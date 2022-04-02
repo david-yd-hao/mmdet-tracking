@@ -2,6 +2,13 @@
   <img src="resources/mmdet-logo.png" width="600"/>
 </div>
 
+### Changes:
+### Sep. 2021
+
+### Added a tracking system inside the MMDetection framework.	Built an object tracking system that can track people and cars based on mmdetection object detection architecture, which can be used on autonomous vehicles. Rewrote the detection system, applied the IoU tracking algorithm, pHash and histogram reID algorithms, and optimized the overall efficiency of the architecture to process videos and frames.
+
+
+
 [![PyPI](https://img.shields.io/pypi/v/mmdet)](https://pypi.org/project/mmdet)
 [![docs](https://img.shields.io/badge/docs-latest-blue)](https://mmdetection.readthedocs.io/en/latest/)
 [![badge](https://github.com/open-mmlab/mmdetection/workflows/build/badge.svg)](https://github.com/open-mmlab/mmdetection/actions)
