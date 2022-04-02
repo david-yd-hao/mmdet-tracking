@@ -1,5 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
+import copy
+import cv2
 
 import mmcv
 import numpy as np
@@ -347,3 +349,305 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
     def onnx_export(self, img, img_metas):
         raise NotImplementedError(f'{self.__class__.__name__} does '
                                   f'not support ONNX EXPORT')
+
+
+    def get_scores_ids(self,
+                        result,
+                        score_thr=0.5,
+                        label=None,
+                        out_file=None):
+        
+        result_local = copy.deepcopy(result)
+        
+        bbox_result = result_local
+        bboxes = np.vstack(bbox_result)
+        
+        labels = [
+            np.full(bbox.shape[0], i, dtype=np.int32)
+            for i, bbox in enumerate(bbox_result)
+        ]
+        labels = np.concatenate(labels)
+
+        if score_thr > 0:
+            assert bboxes.shape[1] == 5
+            scores = bboxes[:, -1]
+
+            # process bboxes, labels, nums, scores based on score_thr
+            inds = scores > score_thr
+            bboxes = bboxes[inds, :]
+            labels = [inds]
+            scores = scores[inds]
+            ids = np.ones(len(labels))
+            for i in range(1, len(scores)):
+                ids[0] = 1
+                if labels[i] == labels[i-1]:
+                    ids[i] = ids[i-1] + 1
+                else: 
+                    ids[i] = 1
+        
+        if label is not None:
+            inds = labels == label
+            bboxes = bboxes[inds, :]
+            labels = labels[inds]
+            scores = scores[inds]
+            ids = ids[inds]
+
+
+        return bboxes, labels, ids, scores
+
+   
+    def show_first_result(self,
+                    img,
+                    result,
+                    score_thr=0.5,
+                    font_size=13,
+                    out_file=None):
+        """Draw `result` over `img`.
+
+        Args:
+            img (str or Tensor): The image to be displayed.
+            result (Tensor or tuple): The results to draw over `img`
+                bbox_result or (bbox_result, segm_result).
+            score_thr (float, optional): Minimum score of bboxes to be shown.
+                Default: 0.3.
+            font_size (int): Font size of texts. Default: 13
+            out_file (str or None): The filename to write the image.
+                Default: None.
+
+        Returns:
+            img (Tensor): Only if not `show` or `out_file`
+        """
+        img = mmcv.imread(img)
+        img = img.copy()
+        
+        bboxes, labels, ids, scores = self.get_scores_ids(result, score_thr=score_thr)
+        # draw bounding boxes
+        img = imshow_det_bboxes(
+            img,
+            bboxes,
+            labels,
+            my_ids=ids,
+            my_scores=scores,
+            class_names=self.CLASSES,
+            score_thr=score_thr,
+            font_size=font_size,
+            out_file=out_file)
+        
+        print(ids)
+        return ids
+
+
+
+    def show_track_result(self,
+                            img,
+                            img_count,
+                            pre_result,
+                            pre_ids,
+                            new_result,
+                            temp_missing_list,
+                            id_feat_list,
+                            iouv=0.5,
+                            score_thr=0.5,
+                            label=0,
+                            font_size=13,
+                            show=False,
+                            out_file=None):
+        """Draw `result` over `img`.
+
+        Args:
+            img (str or Tensor): The image to be displayed.
+            img_count: count of img in video
+            pre_result, new_result (Tensor or tuple): The results to draw over last & new`img`
+            pre_ids, new_ids: ID values for the result
+            temp_missing_list
+            id_feat_list
+            out_file (str or None): The filename to write the image.
+                Default: None.
+
+        Hyper Parameter:
+            iouv (float): iou value
+            score_thr (float, optional): Minimum score of bboxes to be shown.
+                Default: 0.3.
+            label(int): label number to track
+            font_size (int): Font size of texts. Default: 13
+
+
+        Returns:
+            new_ids (1darray): 
+            id_feat_list (2dlist):
+            temp_missing_list (ndlist):
+        """
+        img = mmcv.imread(img)
+        img = img.copy()
+
+
+        pre_bboxes, pre_labels, pre_ids_no, pre_scores = self.get_scores_ids(pre_result, score_thr=score_thr, label=label)
+        new_bboxes, new_labels, new_ids, new_scores = self.get_scores_ids(new_result, score_thr=score_thr, label=label)
+
+
+
+        id_change = 0
+        
+        for j in range(0, len(new_ids)): 
+            id_renew = True
+            for i, (pre_bbox, pre_id) in enumerate(zip(pre_bboxes, pre_ids)):
+                
+                if new_labels[j] != pre_labels[i]:
+                    continue
+                
+
+
+                elif new_labels[j] == pre_labels[i]:
+                    # print('same label found')
+                    # find intersection edge
+
+                    left = max(pre_bbox[0], new_bboxes[j][0])
+                    right = min(pre_bbox[2], new_bboxes[j][2])
+                    top = max(pre_bbox[1], new_bboxes[j][1])
+                    bottom = min(pre_bbox[3], new_bboxes[j][3])
+                    
+                    if left >= right or top >= bottom:
+                        # print('new id created with no intersection')
+                        # print(new_ids.max())
+
+                        continue
+                        # print(new_ids[j])
+                    elif left < right and top < bottom:
+                        inter_area = (right-left) * (bottom-top)
+                        pre_area = (pre_bbox[2]-pre_bbox[0]) * (pre_bbox[3]-pre_bbox[1])
+                        new_area = (new_bboxes[j][2]-new_bboxes[j][0]) * (new_bboxes[j][3]-new_bboxes[j][1])
+                        iou = inter_area / (pre_area + new_area - inter_area)
+                        if iou > iouv and pre_id is not None:
+                            # print("keeping id from"+str(new_ids[j])+'to'+str(pre_id))
+                            new_ids[j] = pre_id
+                            pre_labels[i] = -1
+                            id_renew = False
+                            break
+                        elif iou <= iouv:
+                            # print("intersection smaller than iouv")
+                            continue
+            
+            if id_renew is True:
+                print('New ID created!!!')
+                if len(pre_ids) is 0:
+                    new_ids[j] = 1
+                elif len(pre_ids) is not 0:
+                    id_change += 1
+                    new_ids[j] = pre_ids.max() + id_change
+
+        # add first one to id_feat_list
+        if len(id_feat_list) == 0:
+            for i, (new_bbox, new_id) in enumerate(zip(new_bboxes, new_ids)):
+                if new_bbox[0] > 10 and new_bbox[2] < img.shape[1] - 10:
+                    print('feat created from 0')
+                    crop, feat = self.crop_bbox_festpHash(img, new_bbox)
+                    object_feat_list = [new_id, img_count, feat]
+                    id_feat_list.append(object_feat_list)
+
+        # update id_feat_list
+        for i, (new_bbox, new_id) in enumerate(zip(new_bboxes, new_ids)):
+            person_added_yet = False
+            for person_id_feat in id_feat_list:
+                if new_id == person_id_feat[0]:
+                    person_added_yet = True
+
+                    # update feature in id_feat_list
+                    crop, feat = self.crop_bbox_festpHash(img, new_bbox)
+                    if self.Hamming_distance(person_id_feat[2], feat) < 0.6:
+                        print('feat updated')
+                        for j in range(len(feat)):
+                            person_id_feat[2][j] = person_id_feat[2][j] * 0.7 + feat[j] * 0.3
+                    break
+                elif new_id != person_id_feat[0]:
+                    continue
+            
+            #add a new id feat
+            if person_added_yet == False:
+                if new_bbox[0] > 10 and new_bbox[2] < img.shape[1] - 10:
+                    intersect = False
+                    # for bbox in new_bboxes:
+                    #     if new_bbox[0] != bbox[0] and new_bbox[0] < bbox[2] and new_bbox[2] > bbox[0]:
+                    #         intersect = True
+                    #         print(new_bbox)
+                    #         print(bbox)
+                    #         print('Intersection! Do Not Add!')
+                    #         break
+                    if intersect == False:
+                        print('another feat created')
+                        crop, feat = self.crop_bbox_festpHash(img, new_bbox)
+                        object_feat_list = [new_id, img_count, feat]
+                        id_feat_list.append(object_feat_list)
+        
+
+
+
+        # create temp missing list
+        for i in range(0, len(pre_labels)):
+            if pre_labels[i] >= 0:
+                print('One Person Missing!!!')
+                object_list=[(img_count-1), pre_ids[i]]
+                temp_missing_list.append(object_list)
+        
+        # remove temp missing item after 500 frames
+        for person in temp_missing_list[:]:
+            if person[0] < (img_count-400):
+                temp_missing_list.remove(person)
+
+        # check missing list with id list
+        missing_id_feat=None
+        for missing_person in temp_missing_list:
+            print('!!!!!!Starting Checking')
+            if missing_person[0] < (img_count - 5):
+                for id_feat in id_feat_list:
+                    if id_feat[0] == missing_person[1]:
+                        missing_id_feat = id_feat
+                        print('!!!!!!!!Missing feature get')
+                        break
+                if missing_id_feat==None:
+                    break
+                for check_id_feat in id_feat_list:
+                    # print('check_id'+str(check_id_feat[0]))
+                    # print('missing_id' +str(missing_id_feat[0]))
+                    # print('check appeared at'+str(check_id_feat[1]))
+                    # print('missing disappeared at'+str(missing_person[0]))
+                    if check_id_feat[0] != missing_id_feat[0] and check_id_feat[1] > missing_person[0]:
+                        # print('!!!!!!!!Checking Hamming_distance')
+                        # print('!!!!!!!checked')
+                        # print('!!!!!!!missing')
+                        # print(check_id_feat[2])
+                        # print(missing_id_feat[2])
+                        if self.Hamming_distance(check_id_feat[2], missing_id_feat[2]) < 0.4:
+                            print('!!!!!!!! Hamming_distance Passed, new id assigning')
+                            temp_missing_list.remove(missing_person)
+                            for j in range(len(check_id_feat[2])):
+                                missing_id_feat[2][j] = missing_id_feat[2][j] * 0.6 + check_id_feat[2][j] * 0.4
+                            id_feat_list.remove(check_id_feat)
+                            for i in range(len(new_ids)):
+                                print('changing from (idlist)'+str(new_ids[i]))
+                                print('changing from (featlist)'+str(check_id_feat[0]))
+                                if new_ids[i] == check_id_feat[0]:
+                                    print('changing from '+str(check_id_feat[0])+'to'+str(missing_id_feat[0]))
+                                    new_ids[i] = missing_id_feat[0]
+                                    break
+
+
+
+
+
+        # draw bounding boxes
+        img = imshow_det_bboxes(
+            img,
+            bboxes=new_bboxes,
+            labels=new_labels,
+            my_ids=new_ids,
+            my_scores=new_scores,
+            class_names=self.CLASSES,
+            score_thr=score_thr,
+            font_size=font_size,
+            out_file=out_file)
+        
+        print(new_ids)
+        # print(id_feat_list)
+        print(temp_missing_list)
+        return new_ids, id_feat_list, temp_missing_list
+

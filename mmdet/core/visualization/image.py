@@ -29,6 +29,8 @@ def imshow_det_bboxes(img,
                       bboxes,
                       labels,
                       segms=None,
+                      my_ids=None,
+                      my_scores=None,
                       class_names=None,
                       score_thr=0,
                       bbox_color='green',
@@ -130,35 +132,78 @@ def imshow_det_bboxes(img,
 
     polygons = []
     color = []
-    for i, (bbox, label) in enumerate(zip(bboxes, labels)):
-        bbox_int = bbox.astype(np.int32)
-        poly = [[bbox_int[0], bbox_int[1]], [bbox_int[0], bbox_int[3]],
-                [bbox_int[2], bbox_int[3]], [bbox_int[2], bbox_int[1]]]
-        np_poly = np.array(poly).reshape((4, 2))
-        polygons.append(Polygon(np_poly))
-        color.append(bbox_color)
-        label_text = class_names[
-            label] if class_names is not None else f'class {label}'
-        if len(bbox) > 4:
-            label_text += f'|{bbox[-1]:.02f}'
-        ax.text(
-            bbox_int[0],
-            bbox_int[1],
-            f'{label_text}',
-            bbox={
-                'facecolor': 'black',
-                'alpha': 0.8,
-                'pad': 0.7,
-                'edgecolor': 'none'
-            },
-            color=text_color,
-            fontsize=font_size,
-            verticalalignment='top',
-            horizontalalignment='left')
-        if segms is not None:
-            color_mask = mask_colors[labels[i]]
-            mask = segms[i].astype(bool)
-            img[mask] = img[mask] * 0.5 + color_mask * 0.5
+    if my_ids is None or my_scores is None:
+        for i, (bbox, label) in enumerate(zip(bboxes, labels)):
+            bbox_int = bbox.astype(np.int32)
+            poly = [[bbox_int[0], bbox_int[1]], [bbox_int[0], bbox_int[3]],
+                    [bbox_int[2], bbox_int[3]], [bbox_int[2], bbox_int[1]]]
+            np_poly = np.array(poly).reshape((4, 2))
+            polygons.append(Polygon(np_poly))
+            color.append(bbox_color)
+            label_text = class_names[
+                label] if class_names is not None else f'class {label}'
+            if len(bbox) > 4:
+                label_text += f'|{bbox[-1]:.02f}'
+            ax.text(
+                bbox_int[0],
+                bbox_int[1],
+                f'{label_text}',
+                bbox={
+                    'facecolor': 'black',
+                    'alpha': 0.8,
+                    'pad': 0.7,
+                    'edgecolor': 'none'
+                },
+                color=text_color,
+                fontsize=font_size,
+                verticalalignment='top',
+                horizontalalignment='left')
+            if segms is not None:
+                color_mask = mask_colors[labels[i]]
+                mask = segms[i].astype(bool)
+                img[mask] = img[mask] * 0.5 + color_mask * 0.5
+    
+    else:
+        for i, (bbox, label, score, id) in enumerate(zip(bboxes, labels, my_scores, my_ids)):
+            bbox_int = bbox.astype(np.int32)
+            id = int(id)
+            poly = [[bbox_int[0], bbox_int[1]], [bbox_int[0], bbox_int[3]],
+                    [bbox_int[2], bbox_int[3]], [bbox_int[2], bbox_int[1]]]
+            np_poly = np.array(poly).reshape((4, 2))
+            polygons.append(Polygon(np_poly))
+            if id == 1:
+                bbox_color = 'green'
+            if id == 2:
+                bbox_color = 'blue'
+            if id == 3:
+                bbox_color = 'red'
+            if id == 4:
+                bbox_color = 'black'
+            if id == 5:
+                bbox_color = 'white'
+            color.append(bbox_color)
+            label_text = class_names[
+                label] if class_names is not None else f'class {label}'
+            # label_text += f'|{score:.02f}'
+            label_text += f'|{id:d}'
+            ax.text(
+                bbox_int[0],
+                bbox_int[1],
+                f'{label_text}',
+                bbox={
+                    'facecolor': 'black',
+                    'alpha': 0.8,
+                    'pad': 0.7,
+                    'edgecolor': 'none'
+                },
+                color=text_color,
+                fontsize=font_size,
+                verticalalignment='top',
+                horizontalalignment='left')
+            if segms is not None:
+                color_mask = mask_colors[labels[i]]
+                mask = segms[i].astype(bool)
+                img[mask] = img[mask] * 0.5 + color_mask * 0.5
 
     plt.imshow(img)
 
